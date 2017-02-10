@@ -4,7 +4,11 @@ module Archruby
       module Ruby
 
         class LocalScope
+          attr_reader :var_types
+          attr_reader :var_to_analyse
           def initialize
+            @var_types = {}
+            @var_to_analyse = {}
             @scopes = [Set.new]
             @formal_parameters = [Set.new]
             @current_scope = @scopes.last
@@ -12,9 +16,18 @@ module Archruby
           end
 
           def add_variable(name, type)
+            if(!var_types.has_key?(name.to_sym) && name.to_sym != :self)
+              @var_types[name.to_sym] = Set.new([type])
+            elsif(name.to_sym != :self)
+              @var_types[name.to_sym].add(type)
+            end
             @current_scope.add([name, type])
           end
 
+          def add_var_to_analyse(name, exp)
+            @var_to_analyse[name] = exp  
+          end
+          
           def add_formal_parameter(name, type)
             @current_formal_parameters.add([name, type])
           end
@@ -44,6 +57,8 @@ module Archruby
           end
 
           def remove_scope
+            @var_types = {}
+            @var_to_analyse = {}
             @scopes.pop
             @current_scope = @scopes.last
             @formal_parameters.pop

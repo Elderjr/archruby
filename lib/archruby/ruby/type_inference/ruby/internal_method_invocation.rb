@@ -4,10 +4,14 @@ module Archruby
       module Ruby
 
         class InternalMethodInvocation
-          attr_reader :class_name, :method_name, :params, :linenum, :var_name
+          attr_reader :class_name, :method_name, :params, :linenum, :var_name, :new_params
 
           def initialize(class_name, method_name, params=nil, linenum = nil, var_name=nil, new_params=nil)
-            @class_name = class_name
+            if(class_name.class == Array)
+              @class_name = class_name[0]
+            else
+              @class_name = class_name
+            end
             @method_name = method_name
             @params = params
             @linenum = linenum

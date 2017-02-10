@@ -1,5 +1,7 @@
+require 'sexp_processor'
 require 'set'
 require 'pry'
+
 
 module Archruby
   module Ruby
@@ -19,15 +21,21 @@ module Archruby
             @complete_class_name = []
             @classes = []
             @current_class = []
-            @method_definitions = []
+            #@method_definitions = []
             @dependencies = []
             @current_methods_defined = []
+            
+            @classOn = false #controle para verificar se é uma classe ou módulo
+            @is_self = false #controle para verificar se o método é self ou normal
+            @is_singleton_class = false #controle para verificar se está dentro de uma singleton class
+            @class_definitions = {}
+            @current_class_definition = nil
           end
 
           def parse(content)
             ast = ruby_parser.parse(content)
             process(ast)
-            [@dependencies, @method_definitions]
+            [@dependencies, @class_definitions]
           end
 
           def process_block(exp)
@@ -84,11 +92,21 @@ module Archruby
             if module_name.class == Symbol
               @module_names.push(module_name.to_s)
             end
+            complete_module_name = get_complete_module_name
+            @class_definitions[complete_module_name] = ClassDefinition.new(module_name.to_s, complete_module_name);
+            @current_class_definition = @class_definitions[complete_module_name]
+            puts "Module #{complete_module_name} added"
+            #### verifica includes
+            check_includes_and_extends(args)
+            
             args.map! {|sub_tree| process(sub_tree)}
+            @module_names.pop
           end
 
           def process_class exp
+            @classOn = true
             _, class_name, *args = exp
+            
             methods_defs = exp.find_nodes(:defn)
             methods_defined = []
             methods_defs.each do |method_def|
@@ -109,11 +127,36 @@ module Archruby
               @complete_class_name = []
               @current_class << @classes.last
             end
+            
+            
+            @class_definitions[@classes.last] = ClassDefinition.new(class_name.to_s, @classes.last);
+            @current_class_definition = @class_definitions[@classes.last]
+            puts "class #{@classes.last} added"
+             
+            #### verifica includes e extends
+            check_includes_and_extends(args)
+            
             args.map! {|sub_tree| process(sub_tree) if sub_tree.class == Sexp}
             @current_class.pop
             @current_methods_defined.pop
+            @classOn = false
           end
-
+          
+          def check_includes_and_extends(args)
+            args.each do |value|
+              if(value.class == Sexp && value[0] == :call && (value[2] == :include || value[2] == :extend))
+                exp_arg = value[3]
+                include_type = (value[2] == :extend)
+                module_name = ProcessName.new(exp_arg).parse
+                if(@module_names.include?(module_name))
+                  module_name = get_complete_module_name(module_name)
+                end
+                add_module_methods(module_name , include_type)
+                
+              end
+            end
+          end
+          
           def get_complete_class_name exp
             if exp[0] == :const
               _, const_name = exp
@@ -138,13 +181,15 @@ module Archruby
             end
             args = ProcessMethodArguments.new(method_arguments).parse
             populate_scope_with_formal_parameters(args, method_name)
-            method_calls = ProcessMethodBody.new(method_name, method_body, @current_scope, @current_methods_defined.last).parse
-            add_method_definition(method_name, args, method_calls)
+            method_calls, var_types, var_to_analyse, return_exp = ProcessMethodBody.new(method_name, method_body, @current_scope, @current_methods_defined.last, @current_class_definition, @is_self).parse
+            add_method_definition(method_name, args, method_calls, var_types, var_to_analyse, return_exp, @is_self)
             add_dependencies(args, method_calls)
-            @current_scope.remove_scope            
+            @current_scope.remove_scope
+            @is_self = @is_singleton_class            
           end
 
           def process_defs(exp)
+            @is_self = true
             #transformando em um defn
             without_node_type = exp[2..-1].to_a
             without_node_type.unshift(:defn)
@@ -152,15 +197,68 @@ module Archruby
             process_defn(new_sexp)
           end
 
-          def add_method_definition(method_name, args, method_calls)
-            @method_definitions << MethodDefinition.new(
-                                    @classes.last,
+          def add_module_methods(module_name, is_extend)
+            puts "methods merge (is_extend = #{is_extend}) #{module_name} to #{@current_class_definition.class_name}"
+            @class_definitions[module_name].methods.each do |method|
+              @current_methods_defined.last << method.method_name                
+            end
+            @current_class_definition.merge(@class_definitions[module_name], is_extend)
+          end
+          
+          def add_method_definition(method_name, args, method_calls, var_types, var_to_analyse, return_exp, is_self)
+=begin            
+            if(@classOn)
+              class_name = @classes.last
+              is_module = false
+            elsif(!@module_names.empty?)
+              class_name = get_complete_module_name
+              is_module = true
+            else
+              #identificar o caso
+              puts "caiu"
+            end
+=end
+            method_definition = MethodDefinition.new(
+                                    @current_class_definition.class_name,
                                     method_name,
                                     args,
-                                    method_calls
+                                    method_calls,
+                                    var_types,
+                                    return_exp,
+                                    "a ser definido",
+                                    is_self,
+                                    var_to_analyse
                                   )
+            if(@is_self)
+              @current_class_definition.add_method_self(method_definition)
+              puts "method #{method_name} added in #{@current_class_definition.class_name} singleton class"
+            else
+              @current_class_definition.add_method(method_definition)
+              puts "method #{method_name} added in #{@current_class_definition.class_name} class"
+            end
+            
+            #@method_definitions << method_definition
           end
 
+          def get_complete_module_name(module_name = nil)
+            complete_module_name = ""
+            if(module_name.nil?)
+              complete_module_name = @module_names.join("::")
+            else
+              @module_names.each do |mod|
+                if(complete_module_name.empty?)
+                  complete_module_name = "#{mod}"
+                else
+                  complete_module_name = "#{complete_module_name}::#{mod}"
+                end
+                if(mod == module_name)
+                  break
+                end
+              end
+            end
+            return complete_module_name
+          end
+          
           def add_dependencies(args = nil, method_calls = nil, class_name = nil)
             return if @current_class.last.nil?
             class_dependency = ClassDependency.new(@classes.last)
@@ -422,8 +520,12 @@ module Archruby
           end
 
           def process_sclass(exp)
+            @is_singleton_class = true
+            @is_self = true
             _, singleton_class, *body = exp
             body.map! {|sub_tree| process(sub_tree)}
+            @is_singleton_class = false
+            @is_self = false
           end
 
           def process_hash(exp)

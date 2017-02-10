@@ -4,7 +4,7 @@ module Archruby
       module Ruby
 
         class ProcessMethodBody < SexpInterpreter
-          def initialize(method_name, ast, local_scope, class_defined_methods = nil)
+          def initialize(method_name, ast, local_scope, class_defined_methods = nil, class_definition, is_self)
             super()
             @ast = ast
             @params = {}
@@ -14,11 +14,16 @@ module Archruby
             @local_scope = local_scope
             @method_name = method_name
             @class_defined_methods = class_defined_methods
+            @class_definition = class_definition
+            @return_exp = []
+            @last_exp = []
+            @is_self = is_self
           end
 
           def parse
             @ast.map! {|sub_tree| process(sub_tree)}
-            @method_calls
+            #também retorna os tipos das variáveis do método
+            return @method_calls, @local_scope.var_types, @local_scope.var_to_analyse, @return_exp
           end
 
           def process_call(exp)
@@ -70,13 +75,17 @@ module Archruby
 
           def process_lasgn(exp)
             _, variable_name, *args = exp
-            args.map! { |subtree| process(subtree) }
+            args.map { |subtree| process(subtree) }
             #puts "#{@local_scope.var_type("self").first}, #{@method_name}, #{variable_name} | #{@current_dependency_class_name}"
             if @current_dependency_class_name
               @local_scope.add_variable(variable_name, @current_dependency_class_name)
-              if ["String", "Integer", "Array", "Hash"].include?(@current_dependency_class_name)
+               if ["String", "Integer", "Array", "Hash"].include?(@current_dependency_class_name)
                 add_method_call(@current_dependency_class_name , nil, nil, exp.line, variable_name, nil)
               end
+              puts "var #{variable_name} (type #{@current_dependency_class_name}) added in  the scope of #{@method_name} method"
+            else
+              @local_scope.add_var_to_analyse(variable_name, exp[2])
+              puts "var to analyse #{variable_name} (exp: #{exp[2].to_s}) added in  the scope of #{@method_name} method"
             end
             @current_dependency_class_name = nil
           end
@@ -115,8 +124,28 @@ module Archruby
           end
 
           def process_iasgn(exp)
-            _, instance_varialbe_name, *value = exp
-            value.map! { |subtree| process(subtree) }
+            _, instance_variable_name, *value = exp
+            value.map { |subtree| process(subtree) }
+            if @is_self && @current_dependency_class_name
+              puts "static var #{instance_variable_name} (type: #{@current_dependency_class_name}) added in #{@class_definition.class_name} class"
+              @class_definition.add_static_var(instance_variable_name, @current_dependency_class_name)
+              if ["String", "Integer", "Array", "Hash"].include?(@current_dependency_class_name)
+                add_method_call(@current_dependency_class_name , nil, nil, exp.line, instance_variable_name, nil)
+              end
+            elsif @is_self
+              puts "static var to analyse #{instance_variable_name} (exp: #{exp[2].to_s}) added in #{@class_definition.class_name} class"
+              @class_definition.add_static_var_to_analyse(instance_variable_name, exp[2])
+            elsif !@is_self && @current_dependency_class_name
+              puts "global var #{instance_variable_name} (type: #{@current_dependency_class_name}) added in #{@class_definition.class_name} class"
+              @class_definition.add_var(instance_variable_name, @current_dependency_class_name)
+              if ["String", "Integer", "Array", "Hash"].include?(@current_dependency_class_name)
+                add_method_call(@current_dependency_class_name , nil, nil, exp.line, instance_variable_name, nil)
+              end
+            elsif !@is_self
+              puts "global var to analyse #{instance_variable_name} (exp: #{exp[2].to_s}) added in #{@class_definition.class_name} class"
+              @class_definition.add_var_to_analyse(instance_variable_name, exp[2])
+            end
+            
           end
 
           def process_op_asgn1(exp)
@@ -177,8 +206,9 @@ module Archruby
           end
 
           def process_return(exp)
-            _, *value = exp
-            value.map! {|sub_tree| process(sub_tree)}
+            _, value = exp
+            @return_exp << value
+            #value.map! {|sub_tree| process(sub_tree)}
           end
 
           def process_resbody(exp)

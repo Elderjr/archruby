@@ -3,11 +3,11 @@ module Archruby
     module TypeInference
 
       class TypeInferenceChecker
-        attr_reader :dependencies, :method_definitions
+        attr_reader :dependencies, :class_definitions
 
-        def initialize(dependencies, method_definitions)
+        def initialize(dependencies, class_definitions)
           @dependencies = dependencies
-          @method_definitions = method_definitions
+          @class_definitions = class_definitions  
         end
 
         def total_deps
@@ -20,8 +20,8 @@ module Archruby
 
         def print_method_definitions(base_path)
           file = File.open("#{base_path}/information_archmethods.csv", 'a')
-          @method_definitions.each do |class_name, method_definitions|
-            method_definitions.each do |method_def|
+          @class_definitions.each do |class_name, class_definition|
+            class_definition.all_methods.each do |method_def|
               classes = []
               var_names = []
               method_def.method_calls.each do |m_c|
@@ -40,9 +40,9 @@ module Archruby
           file.close
         end
 
-        def add_dependency_based_on_calls
-          @method_definitions.each do |class_name, method_definitions|
-            method_definitions.each do |method_definition|
+         def add_dependency_based_on_calls
+          @class_definitions.each do |class_name, class_definition|
+            class_definition.all_methods.each do |method_definition|
               method_definition.method_calls.each do |method_call|
                 receiver_class = method_call.class_name
                 method_name = method_call.method_name
@@ -55,8 +55,8 @@ module Archruby
 
         def add_dependency_based_on_internal_calls          
           3.times do
-            @method_definitions.each do |class_name, method_definitions|
-              method_definitions.each do |method_definition|
+            @class_definitions.each do |class_name, class_definition|
+              class_definition.all_methods.each do |method_definition|
                 method_definition.method_calls.each do |method_call|
                   receiver_class = method_call.class_name
                   method_name = method_call.method_name
@@ -113,7 +113,7 @@ module Archruby
         end
 
         def add_to_method_definitions(receiver_class, dependencies, method_name)
-          method_definitions = @method_definitions[receiver_class]
+          method_definitions = @class_definitions[receiver_class].all_methods
           if method_definitions
             method_definitions.each do |method_definition|
               if method_definition.method_name == method_name
@@ -127,7 +127,6 @@ module Archruby
         def add_new_params_dependency(method_definition, dependencies)
           args = method_definition.args.keys
           dependencies.each_with_index do |deps, i|
-            # aqui mantemos a ordem dos parametros formais
             formal_parameter_name = method_definition.args[args[i]]
             if formal_parameter_name
               deps.each do |dep|

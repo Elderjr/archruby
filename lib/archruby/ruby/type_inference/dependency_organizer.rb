@@ -3,11 +3,11 @@ module Archruby
     module TypeInference
 
       class DependencyOrganizer
-        attr_reader :dependencies, :method_definitions
+        attr_reader :dependencies, :class_definitions
 
         def initialize
           @dependencies = {}
-          @method_definitions = {}
+          @class_definitions = {}
         end
 
         def add_dependencies(found_dependencies)
@@ -18,24 +18,68 @@ module Archruby
           end
         end
 
-        def add_method_calls(found_calls)          
-          found_calls.each do |method_definition|
-            next if unused_method_definition?(method_definition)
-            method_name = method_definition.method_name
-            class_name = method_definition.class_name
-            args = method_definition.args
-            internal_method_calls = []
-            method_definition.method_calls.each do |internal_method_call|
-              next if unused_internal_method_call?(internal_method_call)
-              internal_method_calls << internal_method_call
+         def add_class_definitions(class_definitions)
+          all_internal_method_calls = []
+          class_definitions.each do |class_name, class_definition|
+            class_definition.all_methods.each do |method_definition|
+              internal_method_calls = []
+              method_definition.method_calls.each do |internal_method_call|
+                next if unused_internal_method_call?(internal_method_call)
+                all_internal_method_calls << internal_method_call
+                internal_method_calls << internal_method_call
+              end
+              method_definition.method_calls = internal_method_calls 
             end
-            if !internal_method_calls.empty?
-              method_def = Ruby::MethodDefinition.new(class_name, method_name, args, internal_method_calls)
+          end
+          add_args(all_internal_method_calls)
+          @class_definitions = class_definitions
+=begin
+          class_definitions.each do |class_name, class_definition|
+            class_definition.all_methods.each do |method_definition|
+              #next if unused_method_definition?(method_definition)
+              method_name = method_definition.method_name
+              class_name = method_definition.class_name
+              args = method_definition.args
+              var_types = method_definition.var_types
+              return_exp = method_definition.return_types
+              internal_method_calls = []
+              is_module = method_definition.is_module
+              is_self = method_definition.is_self
+              var_to_analyse = method_definition.var_to_analyse
+              method_definition.method_calls.each do |internal_method_call|
+                next if unused_internal_method_call?(internal_method_call)
+                internal_method_calls << internal_method_call
+                all_internal_method_calls << internal_method_call
+              end
+              #if !internal_method_calls.empty?
+              method_def = Ruby::MethodDefinition.new(class_name, method_name, args, internal_method_calls, var_types, return_exp, is_module, is_self, var_to_analyse)
               @method_definitions[class_name] ||= []
               @method_definitions[class_name] << method_def
+              #end
+            end
+          end
+=end
+        end
+        
+         def add_args(all_internal_method_calls)
+          #percorre todos os internal_methods
+          all_internal_method_calls.each do |internal_method|
+          #descobre nome da classe que foi chamada
+            class_name = internal_method.class_name.class == Array ? internal_method.class_name[0] : internal_method.class_name
+            #percorre os métodos da classe
+            if(@class_definitions.has_key?(class_name))
+              @class_definitions[class_name].all_methods.each do |method_definition|
+              #acha o método que foi chamado
+                if(method_definition.method_name == internal_method.method_name)
+                  for index in 0..(internal_method.new_params.size-1)
+                    method_definition.add_arg(index, internal_method.new_params[index])
+                  end
+                end
+              end
             end
           end
         end
+
 
         def read_from_csv_file
           require 'csv'
